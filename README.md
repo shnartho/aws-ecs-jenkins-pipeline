@@ -230,19 +230,25 @@ Each is tagged inline with a `FLAW:` comment explaining the impact and correctio
 | Docker build | `docker build -f docker/app/Dockerfile docker/app` | Manually runnable |
 | Jenkinsfile syntax | Declarative pipeline; validate with a running Jenkins instance's `declarative-linter`, or manual review | Manual review done |
 | Script correctness | `bash -n scripts/verify_health.sh`; manual trace of the flaw (confirmed non-breaking) | Done |
-| Live deployment verifier | `python3 scripts/verify_deployment.py --expected-account 123456789012` | Checks AWS resources and public health with pass/fail emoji output |
+| Local validation | `make validate` | Runs Terraform, Python, Bash, and protected-fixture checks |
+| Live deployment verifier | `make verify` | Checks AWS resources and public health with pass/fail emoji output |
 | ECR push / ECS deploy / ALB connectivity / HTTPS / Jenkins geo-restriction / Route53 health checks / CloudWatch alarms / SNS / S3 logging / VPC peering / ECS service health | Require a live AWS deployment with `certificate_arn` + `alert_email` supplied | See [Deployment Instructions](#13-deployment-instructions) |
 
 The three deliberate flaws are non-breaking acceptance fixtures. Deployment requires only the
 external prerequisites and image bootstrap described below.
 
-Run the live verification from Git Bash or another Linux-compatible shell:
+Create the ignored local Make configuration once, replace the synthetic account ID, and then use
+the Make targets without repeatedly exporting AWS settings:
 
 ```bash
-export AWS_PROFILE="gold-restaurant"
-export EXPECTED_AWS_ACCOUNT_ID="123456789012" # replace with the workload account ID
-python3 scripts/verify_deployment.py
+cp Makefile.local.example Makefile.local
+# Edit Makefile.local with the intended profile, region, and workload account ID.
+make verify
+make validate
 ```
+
+The current deployment workspace already has its ignored `Makefile.local`; no setup command is
+needed there. Run `make` to list the available targets.
 
 ## 13. Deployment Instructions
 

@@ -32,6 +32,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+Makefile.local
 *.pem
 *.key
 *.p12
