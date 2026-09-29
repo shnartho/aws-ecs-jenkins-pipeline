@@ -420,6 +420,5 @@ The live verifier now requires an explicit expected account, reports each check 
 cleanly when interrupted, and correctly interprets ECS service failures and WAF association
 responses. `make validate` passed both Terraform roots, Python compilation, Bash syntax, and the
 three-flaw assertion. `make verify` confirmed the deployed networking, ECS services, ALBs, HTTPS,
-Route53, ECR, CodeBuild, logging, EFS, and WAF controls. The remaining failed check is a genuine
-operational dependency: the regional SNS email subscription is still pending confirmation and is
-intentionally not suppressed by the automation.
+Route53, ECR, CodeBuild, logging, EFS, and WAF controls. After both regional and billing SNS email
+subscriptions were confirmed, the complete live verification suite passed.

@@ -253,6 +253,7 @@ class Verifier:
             "broken-cloud-pipeline-alerts": self.region,
             "broken-cloud-pipeline-billing-alerts": "us-east-1",
         }
+        unconfirmed_topics = []
         for topic_name, topic_region in topic_regions.items():
             topics = self.aws_json("sns", "list-topics", region=topic_region).get("Topics", [])
             matches = [topic["TopicArn"] for topic in topics if topic["TopicArn"].endswith(f":{topic_name}")]
@@ -261,7 +262,9 @@ class Verifier:
                 "sns", "list-subscriptions-by-topic", "--topic-arn", matches[0], region=topic_region
             ).get("Subscriptions", [])
             confirmed = [item for item in subscriptions if item["SubscriptionArn"] != "PendingConfirmation"]
-            require(confirmed, f"SNS topic {topic_name} has no confirmed subscription")
+            if not confirmed:
+                unconfirmed_topics.append(f"{topic_name} ({topic_region})")
+        require(not unconfirmed_topics, f"SNS topics have no confirmed subscription: {', '.join(unconfirmed_topics)}")
         return "3 alarms enabled and both SNS topics have confirmed subscriptions"
 
     def check_logs_and_efs(self) -> str:
