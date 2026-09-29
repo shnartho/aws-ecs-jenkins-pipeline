@@ -1,0 +1,4 @@
+# Copy to Makefile.local and replace the synthetic account ID.
+AWS_PROFILE := gold-restaurant
+AWS_REGION := eu-central-1
+EXPECTED_AWS_ACCOUNT_ID := 123456789012

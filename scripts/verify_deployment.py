@@ -63,10 +63,14 @@ class Verifier:
         return json.loads(completed.stdout or "{}")
 
     def check(self, name: str, function: Callable[[], str]) -> None:
+        print(f"⏳ {name}...", flush=True)
         try:
-            self.results.append((True, name, function()))
+            detail = function()
+            self.results.append((True, name, detail))
+            print(f"✅ {name}: {detail}", flush=True)
         except (VerificationError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:
             self.results.append((False, name, str(error)))
+            print(f"❌ {name}: {error}", flush=True)
 
     def check_identity(self) -> str:
         identity = self.aws_json("sts", "get-caller-identity")
@@ -112,12 +116,14 @@ class Verifier:
         return "app and Jenkins VPC peering is active"
 
     def check_ecs(self, cluster: str, service_name: str, expected_tasks: int) -> str:
-        services = self.aws_json(
+        response = self.aws_json(
             "ecs", "describe-services", "--cluster", cluster, "--services", service_name
-        ).get("services", [])
+        )
+        failures = response.get("failures", [])
+        require(not failures, f"service lookup failures: {failures}")
+        services = response.get("services", [])
         require(len(services) == 1, f"service {service_name} was not found")
         service = services[0]
-        require(not service.get("failures"), f"service failures: {service['failures']}")
         require(service["desiredCount"] == expected_tasks, f"desired count is {service['desiredCount']}")
         require(service["runningCount"] == expected_tasks, f"running count is {service['runningCount']}")
         require(service["pendingCount"] == 0, f"pending count is {service['pendingCount']}")
@@ -247,6 +253,7 @@ class Verifier:
             "broken-cloud-pipeline-alerts": self.region,
             "broken-cloud-pipeline-billing-alerts": "us-east-1",
         }
+        unconfirmed_topics = []
         for topic_name, topic_region in topic_regions.items():
             topics = self.aws_json("sns", "list-topics", region=topic_region).get("Topics", [])
             matches = [topic["TopicArn"] for topic in topics if topic["TopicArn"].endswith(f":{topic_name}")]
@@ -255,7 +262,9 @@ class Verifier:
                 "sns", "list-subscriptions-by-topic", "--topic-arn", matches[0], region=topic_region
             ).get("Subscriptions", [])
             confirmed = [item for item in subscriptions if item["SubscriptionArn"] != "PendingConfirmation"]
-            require(confirmed, f"SNS topic {topic_name} has no confirmed subscription")
+            if not confirmed:
+                unconfirmed_topics.append(f"{topic_name} ({topic_region})")
+        require(not unconfirmed_topics, f"SNS topics have no confirmed subscription: {', '.join(unconfirmed_topics)}")
         return "3 alarms enabled and both SNS topics have confirmed subscriptions"
 
     def check_logs_and_efs(self) -> str:
@@ -282,23 +291,13 @@ class Verifier:
 
     def check_waf(self) -> str:
         load_balancer = self.get_load_balancer("jenkins-alb")
-        summary = self.aws_json(
+        web_acl = self.aws_json(
             "wafv2",
             "get-web-acl-for-resource",
             "--resource-arn",
             load_balancer["LoadBalancerArn"],
-        ).get("WebACLSummary")
-        require(summary and summary["Name"] == "jenkins-geo-restriction", "expected Jenkins WAF is not associated")
-        web_acl = self.aws_json(
-            "wafv2",
-            "get-web-acl",
-            "--scope",
-            "REGIONAL",
-            "--id",
-            summary["Id"],
-            "--name",
-            summary["Name"],
-        )["WebACL"]
+        ).get("WebACL")
+        require(web_acl and web_acl["Name"] == "jenkins-geo-restriction", "expected Jenkins WAF is not associated")
         geo_rules = [rule for rule in web_acl["Rules"] if rule["Name"] == "allow-configured-countries"]
         require(len(geo_rules) == 1, "Jenkins geographic allow rule was not found")
         countries = geo_rules[0]["Statement"]["GeoMatchStatement"]["CountryCodes"]
@@ -346,14 +345,14 @@ def main() -> int:
         ("Jenkins geographic restriction", verifier.check_waf),
     ]
 
-    print("Deployment verification")
-    print("=======================")
-    for name, function in checks:
-        verifier.check(name, function)
-
-    for passed, name, detail in verifier.results:
-        icon = "✅" if passed else "❌"
-        print(f"{icon} {name}: {detail}")
+    print("Deployment verification", flush=True)
+    print("=======================", flush=True)
+    try:
+        for name, function in checks:
+            verifier.check(name, function)
+    except KeyboardInterrupt:
+        print("\n⚠️ Verification interrupted by user.", flush=True)
+        return 130
 
     failures = sum(not passed for passed, _, _ in verifier.results)
     print()
