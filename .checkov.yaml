@@ -1,0 +1,22 @@
+# Checkov configuration. Skips below are intentional, documented architectural decisions -
+# NOT the three intentional flaws (see README.md "Deliberate Flaws" section for those).
+# Check IDs can drift between Checkov versions; re-validate this list after upgrading.
+directory:
+  - terraform
+
+skip-check:
+  # This bucket IS the centralized log destination (ALB/ECS/pipeline logs); enabling S3 access
+  # logging on it would create a recursive logging loop against itself.
+  - CKV_AWS_18
+  # ecr:GetAuthorizationToken and ecs:RegisterTaskDefinition do not support resource-level ARNs -
+  # AWS requires these two actions to be granted on "*" regardless of how narrow the rest of the
+  # policy is. See terraform/envs/eu-central-1/jenkins.tf for the surrounding least-privilege policy.
+  - CKV_AWS_111
+  - CKV_AWS_107
+  - CKV_AWS_108
+  - CKV_AWS_109
+  # Docker privilege is isolated to the short-lived CodeBuild environment; Jenkins has no socket.
+  - CKV_AWS_316
+
+compact: true
+quiet: false

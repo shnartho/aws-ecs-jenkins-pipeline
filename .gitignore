@@ -1,0 +1,58 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+!*.tfvars.example
+**/backend.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform lock files are intentionally NOT ignored - see terraform/envs/eu-central-1/.terraform.lock.hcl
+
+# Docker / OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+credentials
+
+# Python helper script artifacts
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jenkins pipeline scratch files (created by Jenkinsfile, not part of the repo)
+*.log
+source.zip
+current-task-def.json
+new-task-def.json

@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in the two required values before running `terraform plan/apply`.
+# Neither value can be invented by Terraform - see README.md "Assumptions / External Prerequisites".
+
+# Required: ACM certificate ARN used by both ALBs' HTTPS listeners (real DNS-validated cert, or a
+# self-signed certificate you have imported into ACM).
+certificate_arn = "arn:aws:acm:eu-central-1:123456789012:certificate/REPLACE-ME"
+
+# Required: email address that will receive SNS notifications (ALB 5xx alarms, cost alarm, Jenkins
+# pipeline results). AWS sends a confirmation email after apply - it must be manually accepted.
+alert_email = "you@example.com"
+
+# Optional: only set these if you own a domain and want friendly DNS names instead of raw ALB DNS
+# names. Route53 health checks work without them.
+# domain_name     = "example.com"
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"

@@ -1,0 +1,110 @@
+// Jenkinsfile - manually triggered pipeline: build app image, push to ECR, deploy to ECS, verify, notify.
+// No SCM polling / webhook triggers are configured (deliberately, per the "manually triggered" requirement).
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+  }
+
+  parameters {
+    // Unique tag per build; the app ECR repo is immutable-tagged so tags are never reused.
+    string(name: 'IMAGE_TAG', defaultValue: "build-${env.BUILD_NUMBER}", description: 'Tag applied to the built image')
+  }
+
+  environment {
+    AWS_REGION     = 'eu-central-1'
+    // The values below are expected to be configured as Jenkins global/job environment variables
+    // (e.g. via the Jenkins "Global properties" or injected from Terraform outputs) - never hardcoded here.
+    ECR_REPOSITORY = "${env.ECR_REPOSITORY_URL}"
+    ECS_CLUSTER    = "${env.APP_ECS_CLUSTER_NAME}"
+    ECS_SERVICE    = "${env.APP_ECS_SERVICE_NAME}"
+    APP_ALB_URL    = "${env.APP_ALB_HTTPS_URL}"
+    LOGS_BUCKET    = "${env.PIPELINE_LOGS_BUCKET}"
+    SNS_TOPIC_ARN  = "${env.SNS_TOPIC_ARN}"
+    CODEBUILD_PROJECT = "${env.CODEBUILD_PROJECT_NAME}"
+    BUILD_LOG_FILE = "build-${env.BUILD_NUMBER}.log"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        sh ": > ${BUILD_LOG_FILE}"
+      }
+    }
+
+    stage('Build and push image') {
+      steps {
+        sh """
+          SOURCE_OBJECT=codebuild-sources/${JOB_NAME}/${BUILD_NUMBER}.zip
+          zip -qr source.zip . -x '.git/*'
+          aws s3 cp source.zip s3://${LOGS_BUCKET}/\$SOURCE_OBJECT
+          BUILD_ID=\$(aws codebuild start-build --region ${AWS_REGION} --project-name ${CODEBUILD_PROJECT} \
+            --environment-variables-override name=SOURCE_OBJECT,value=\$SOURCE_OBJECT,type=PLAINTEXT name=IMAGE_TAG,value=${params.IMAGE_TAG},type=PLAINTEXT \
+            --query 'build.id' --output text)
+
+          while true; do
+            BUILD_STATUS=\$(aws codebuild batch-get-builds --region ${AWS_REGION} --ids \$BUILD_ID --query 'builds[0].buildStatus' --output text)
+            case \$BUILD_STATUS in
+              SUCCEEDED|FAILED|FAULT|STOPPED|TIMED_OUT) break ;;
+              *) sleep 10 ;;
+            esac
+          done
+
+          LOG_STREAM=\$(aws codebuild batch-get-builds --region ${AWS_REGION} --ids \$BUILD_ID --query 'builds[0].logs.streamName' --output text)
+          aws logs get-log-events --region ${AWS_REGION} --log-group-name /aws/codebuild/app-image \
+            --log-stream-name \$LOG_STREAM --query 'events[].message' --output text > ${BUILD_LOG_FILE} || true
+          test \$BUILD_STATUS = SUCCEEDED
+        """
+      }
+    }
+
+    stage('Deploy to ECS') {
+      steps {
+        // Registers a new task definition revision with the new image tag and points the service at
+        // it, rather than reusing a mutable tag - avoids ECS/Docker image-caching ambiguity on hosts.
+        sh """
+          aws ecs describe-task-definition --task-definition ${ECS_SERVICE} --region ${AWS_REGION} \
+            --query 'taskDefinition' > current-task-def.json
+          python3 scripts/render_task_def.py current-task-def.json "${ECR_REPOSITORY}:${params.IMAGE_TAG}" > new-task-def.json
+          NEW_ARN=\$(aws ecs register-task-definition --region ${AWS_REGION} --cli-input-json file://new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --task-definition "\$NEW_ARN" --region ${AWS_REGION}
+          aws ecs wait services-stable --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION}
+        """
+      }
+    }
+
+    stage('Verify') {
+      steps {
+        sh "bash scripts/verify_health.sh https://${APP_ALB_URL}/health"
+      }
+    }
+  }
+
+  post {
+    always {
+      // FLAW: verbose docker build/push logs are archived to S3 on EVERY run, including successful
+      // ones, instead of only on failure (or as a short trimmed summary).
+      // Operational/cost impact: every manual trigger permanently adds a full-verbosity log object to
+      // S3 (PUT + storage cost) regardless of outcome, with no corresponding benefit for successful runs.
+      // Fix: move this upload into the `failure { ... }` block below, or trim to a short status line.
+      sh "touch ${BUILD_LOG_FILE} && aws s3 cp ${BUILD_LOG_FILE} s3://${LOGS_BUCKET}/pipeline-logs/${JOB_NAME}/${BUILD_NUMBER}.log"
+    }
+    success {
+      sh """
+        aws sns publish --region ${AWS_REGION} --topic-arn ${SNS_TOPIC_ARN} \
+          --subject 'Jenkins pipeline SUCCESS: ${JOB_NAME} #${BUILD_NUMBER}' \
+          --message 'Build and deployment succeeded.'
+      """
+    }
+    failure {
+      sh """
+        aws sns publish --region ${AWS_REGION} --topic-arn ${SNS_TOPIC_ARN} \
+          --subject 'Jenkins pipeline FAILURE: ${JOB_NAME} #${BUILD_NUMBER}' \
+          --message 'Build or deployment failed - check Jenkins logs.'
+      """
+    }
+  }
+}
