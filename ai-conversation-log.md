@@ -404,3 +404,22 @@ deployed as `jenkins:9`.
 Final evidence: Jenkins reached 1 running / 1 desired with a healthy target; both public HTTPS
 endpoints returned HTTP 200; every Route53 observation succeeded; and the workload plan
 converged with no changes. Exactly three protected `FLAW:` markers remain.
+
+---
+
+## Turn 17 - Local Verification Automation
+
+Created branch `feat/local-make-workflow-automation` to make repository and live-deployment checks
+repeatable without embedding operator-specific values in version control. A tracked `Makefile`
+defines focused targets for live verification, Terraform initialization, static validation, and
+the exact three-flaw contract. A tracked `Makefile.local.example` documents the input contract,
+while ignored `Makefile.local` and `backend.hcl` files retain the real AWS account and backend
+values locally.
+
+The live verifier now requires an explicit expected account, reports each check as it runs, exits
+cleanly when interrupted, and correctly interprets ECS service failures and WAF association
+responses. `make validate` passed both Terraform roots, Python compilation, Bash syntax, and the
+three-flaw assertion. `make verify` confirmed the deployed networking, ECS services, ALBs, HTTPS,
+Route53, ECR, CodeBuild, logging, EFS, and WAF controls. The remaining failed check is a genuine
+operational dependency: the regional SNS email subscription is still pending confirmation and is
+intentionally not suppressed by the automation.
