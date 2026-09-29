@@ -10,7 +10,47 @@ This repository is the implementation of the assignment in [task.md](task.md). S
 
 Repository: [shnartho/aws-ecs-jenkins-pipeline](https://github.com/shnartho/aws-ecs-jenkins-pipeline)
 
-## 1. Project Overview
+## 1. Live Demo and Reviewer Checks
+
+Reviewers can inspect the deployed user-facing surfaces directly in a browser:
+
+| Surface | URL | Expected result |
+|---|---|---|
+| Application | [https://app.goldrg.com](https://app.goldrg.com) | Hello-world application loads over HTTPS with HTTP 200 |
+| Application health | [https://app.goldrg.com/health](https://app.goldrg.com/health) | Health endpoint returns HTTP 200 |
+| Jenkins | [https://jenkins.goldrg.com/login](https://jenkins.goldrg.com/login) | Jenkins login page loads over HTTPS with HTTP 200 from Portugal |
+
+Jenkins is intentionally protected by an AWS WAF geographic allow rule. A reviewer outside
+Portugal should expect an HTTP 403 response rather than the login page; that response confirms
+the restriction is being enforced. Use the certificate-compatible domain names above rather than
+the raw ALB hostnames.
+
+## What to Expect
+
+Use this map to jump directly to the implementation detail or operational evidence you need.
+
+| Section | What you will find |
+|---|---|
+| [1. Live Demo and Reviewer Checks](#1-live-demo-and-reviewer-checks) | Browser links and expected end-user behavior |
+| [2. Project Overview](#2-project-overview) | Workload purpose, account boundaries, and runtime model |
+| [3. Architecture](#3-architecture) | End-to-end AWS topology and traffic flow diagram |
+| [4. AWS Services Used](#4-aws-services-used) | Service inventory and responsibilities |
+| [5. Networking](#5-networking) | VPCs, subnets, routing, peering, ingress, and egress decisions |
+| [6. Terraform Structure](#6-terraform-structure) | Bootstrap/workload separation and reusable module boundaries |
+| [7. ECS Architecture](#7-ecs-architecture) | ECS-on-EC2 capacity, task placement, persistence, and deployment behavior |
+| [8. Jenkins Pipeline](#8-jenkins-pipeline) | CodeBuild-backed image build and ECS release workflow |
+| [9. Security Model](#9-security-model) | IAM, network controls, encryption, WAF, and secret-handling boundaries |
+| [10. Monitoring / Logging](#10-monitoring--logging) | CloudWatch, SNS, Route53, S3, and log retention model |
+| [11. Cost Decisions](#11-cost-decisions) | Cost-aware infrastructure choices and rejected alternatives |
+| [12. The Three Deliberate Flaws](#12-the-three-deliberate-flaws) | Exact protected flaws, impacts, and independent fixes |
+| [13. Testing](#13-testing) | Static checks, live verification, and local Make workflow |
+| [14. Deployment Instructions](#14-deployment-instructions) | Ordered bootstrap and workload deployment procedure |
+| [15. Cleanup Instructions](#15-cleanup-instructions) | Safe resource teardown sequence |
+| [16. Assumptions / External Prerequisites](#16-assumptions--external-prerequisites) | Required external inputs, quotas, and manual actions |
+| [17. Tradeoffs](#17-tradeoffs) | Explicit architectural compromises that are not flaws |
+| [18. AI Usage](#18-ai-usage) | Location of the AI-assisted engineering record |
+
+## 2. Project Overview
 
 Two independent, peered VPCs each host one ECS-on-EC2 cluster behind one public Application Load
 Balancer:
@@ -23,7 +63,7 @@ Balancer:
 Jenkins uploads a source archive and delegates the privileged Docker build to AWS CodeBuild, then
 deploys the immutable ECR image to ECS. The controller runs non-root with no host Docker socket.
 
-## 2. Architecture
+## 3. Architecture
 
 ```mermaid
 graph TB
@@ -57,26 +97,26 @@ Both ALBs sit in public subnets; all compute (ECS EC2 instances and tasks) stays
 subnets. There is no SSH/bastion anywhere - instance access is via AWS SSM Session Manager only,
 consistent with the "HTTPS-only inbound" requirement.
 
-## 3. AWS Services Used
+## 4. AWS Services Used
 
 EC2, ECS (EC2 launch type via a capacity provider, not Fargate), IAM, Route53 (health checks),
 S3 (logging), CloudWatch (logs, alarms), ECR, SNS, plus VPC/ALB/WAFv2 as required supporting
 networking/edge services.
 
-## 4. Networking
+## 5. Networking
 
 | Concern | Decision |
 |---|---|
 | VPC module | `terraform-aws-modules/vpc/aws` for both VPCs, per requirement |
 | Subnets | 2 public + 2 private per VPC (4 total per VPC), one AZ pair (`eu-central-1a/b`) |
-| NAT | **1 NAT Gateway per VPC** (single-AZ, not one-per-AZ) - see [Tradeoffs](#16-tradeoffs) |
-| VPC endpoints | Free **S3 gateway endpoint** in each VPC, to keep S3 traffic off the NAT Gateway. Interface endpoints (ECR/CloudWatch/SSM) were evaluated and rejected as over-engineering for this exercise's traffic volume - see [Cost Decisions](#10-cost-decisions) |
+| NAT | **1 NAT Gateway per VPC** (single-AZ, not one-per-AZ) - see [Tradeoffs](#17-tradeoffs) |
+| VPC endpoints | Free **S3 gateway endpoint** in each VPC, to keep S3 traffic off the NAT Gateway. Interface endpoints (ECR/CloudWatch/SSM) were evaluated and rejected as over-engineering for this exercise's traffic volume - see [Cost Decisions](#11-cost-decisions) |
 | VPC Peering | One peering connection + routes between `10.40.0.0/16` and `10.41.0.0/16` private route tables, satisfying the explicit requirement (Jenkins actually deploys via public AWS APIs, not a direct network path - the peering has no other functional dependency in this design) |
 | NACLs | Custom NACL on **public** subnets only: allow 443 inbound + ephemeral (1024-65535) return traffic, allow all outbound. Private subnets keep module defaults (allow all intra-VPC) since security groups are the real reachability boundary there |
 | Security groups | ALB SGs: 443 inbound from `allowed_cidrs` (all outbound). ECS instance SGs: dynamic port range (32768-65535) from the ALB SG only (all outbound) |
 | Internet access | HTTPS (443) only, anywhere, in or out of the ALBs |
 
-## 5. Terraform Structure
+## 6. Terraform Structure
 
 ```
 terraform/
@@ -105,7 +145,7 @@ workload stack that could modify its own deploy role would be a privilege-escala
 the narrow, prefix-scoped runtime roles inside `modules/ecs-service` (instance/task/execution
 roles - those are fine, since they only grant the running containers permissions, not the deployer).
 See `terraform/bootstrap/providers.tf` for why bootstrap uses local state, and its
-`terraform.tfvars.example` / this repo's [Deployment Instructions](#13-deployment-instructions) for
+`terraform.tfvars.example` / this repo's [Deployment Instructions](#14-deployment-instructions) for
 how to run it.
 
 **File-splitting standard**: one file per resource *concern* within the single `envs/eu-central-1`
@@ -116,9 +156,9 @@ Every resource has a one-line comment explaining its purpose; `variables.tf` use
 `default_tags` in `providers.tf`.
 
 Terraform is verified with `terraform fmt -recursive -check` and `terraform validate` (both pass -
-see [Testing](#12-testing)), plus `tflint` and `checkov` via pre-commit.
+see [Testing](#13-testing)), plus `tflint` and `checkov` via pre-commit.
 
-## 6. ECS Architecture
+## 7. ECS Architecture
 
 Both clusters use the same reusable `modules/ecs-service`:
 
@@ -134,11 +174,11 @@ Both clusters use the same reusable `modules/ecs-service`:
 | | App | Jenkins |
 |---|---|---|
 | Containers | 2x customized `hello-world` | 1x versioned custom Jenkins |
-| Task CPU/Mem | **1024**/512 (see [Flaw #1](#11-the-three-deliberate-flaws)) | 512/700 |
+| Task CPU/Mem | **1024**/512 (see [Flaw #1](#12-the-three-deliberate-flaws)) | 512/700 |
 | Task role extras | none | CodeBuild invocation, ECS deploy, S3/log/SNS access |
 | Docker socket mount | no | no |
 
-## 7. Jenkins Pipeline
+## 8. Jenkins Pipeline
 
 `jenkins/Jenkinsfile` - manually triggered only (no SCM polling/webhooks):
 
@@ -151,7 +191,7 @@ Both clusters use the same reusable `modules/ecs-service`:
 6. **Post**: `always` archives build logs to S3 (**Flaw #2** - see below); `success`/`failure`
    both publish to SNS, so every outcome is emailed.
 
-## 8. Security Model
+## 9. Security Model
 
 - **Inbound**: 443 only, everywhere (ALB SGs and public-subnet NACLs). No SSH/bastion anywhere;
   instance access is via SSM Session Manager.
@@ -162,7 +202,7 @@ Both clusters use the same reusable `modules/ecs-service`:
   app service; unavoidable unscoped ECS actions are documented inline.
 - **Secrets**: none are committed. Transcrypt is configured per the requirement, but there is
   nothing sensitive to encrypt because credentials are never stored in the repo - IAM roles are
-  used everywhere instead (see [Tradeoffs](#16-tradeoffs)).
+  used everywhere instead (see [Tradeoffs](#17-tradeoffs)).
 - **S3**: the logging bucket is private (public access block), SSE-S3 encrypted, versioned with
   lifecycle expiration, and its bucket policy grants write access only to the AWS-managed ELB
   log-delivery principal on the `alb-logs/*` prefix.
@@ -175,9 +215,9 @@ Both clusters use the same reusable `modules/ecs-service`:
   restricted to the `app-*`/`jenkins-*` resource prefixes it creates) with a separate trust policy
   (`data.aws_iam_policy_document.deploy_trust`) naming the specific principals allowed to assume
   it. Permissions and trust policies are different documents and are not interchangeable - see
-  [Terraform Structure](#5-terraform-structure) for why this lives in its own layer entirely.
+  [Terraform Structure](#6-terraform-structure) for why this lives in its own layer entirely.
 
-## 9. Monitoring / Logging
+## 10. Monitoring / Logging
 
 - **CloudWatch**: `HTTPCode_Target_5XX_Count > 0` alarm per ALB, plus an `AWS/Billing`
   `EstimatedCharges` alarm (must run in `us-east-1` - AWS only publishes billing metrics there).
@@ -185,11 +225,11 @@ Both clusters use the same reusable `modules/ecs-service`:
 - **SNS**: two topics (one per region, since alarm actions must be in the same region as the
   alarm) both subscribed with the same email; each requires manual confirmation after apply.
 - **Route53**: one HTTPS health check per ALB, targeting the ALB's own AWS DNS name directly - no
-  owned domain is required (see [Assumptions](#15-assumptions--external-prerequisites)).
+  owned domain is required (see [Assumptions](#16-assumptions--external-prerequisites)).
 - **S3 logging**: ALB access logs (`alb-logs/app/`, `alb-logs/jenkins/`) and Jenkins pipeline logs
   (`pipeline-logs/`) all land in one bucket with a 30-day expiration lifecycle rule.
 
-## 10. Cost Decisions
+## 11. Cost Decisions
 
 - `t3.micro` x4 (2 per cluster x 2 clusters) - the smallest instance size that satisfies the
   assignment's explicit "t3.micro" requirement; exceeds the literal AWS free-tier hour allowance
@@ -207,7 +247,7 @@ Both clusters use the same reusable `modules/ecs-service`:
 - The daily cost alarm (`> $1`) is intentionally set low so it reliably fires - that's by design,
   not a bug, to demonstrate the SNS notification path.
 
-## 11. The Three Deliberate Flaws
+## 12. The Three Deliberate Flaws
 
 | # | Location | Flaw | Non-breaking because | Fix |
 |---|---|---|---|---|
@@ -217,7 +257,7 @@ Both clusters use the same reusable `modules/ecs-service`:
 
 Each is tagged inline with a `FLAW:` comment explaining the impact and correction.
 
-## 12. Testing
+## 13. Testing
 
 | Check | Tool/Method | Status |
 |---|---|---|
@@ -232,7 +272,7 @@ Each is tagged inline with a `FLAW:` comment explaining the impact and correctio
 | Script correctness | `bash -n scripts/verify_health.sh`; manual trace of the flaw (confirmed non-breaking) | Done |
 | Local validation | `make validate` | Runs Terraform, Python, Bash, and protected-fixture checks |
 | Live deployment verifier | `make verify` | Checks AWS resources and public health with pass/fail emoji output |
-| ECR push / ECS deploy / ALB connectivity / HTTPS / Jenkins geo-restriction / Route53 health checks / CloudWatch alarms / SNS / S3 logging / VPC peering / ECS service health | Require a live AWS deployment with `certificate_arn` + `alert_email` supplied | See [Deployment Instructions](#13-deployment-instructions) |
+| ECR push / ECS deploy / ALB connectivity / HTTPS / Jenkins geo-restriction / Route53 health checks / CloudWatch alarms / SNS / S3 logging / VPC peering / ECS service health | Require a live AWS deployment with `certificate_arn` + `alert_email` supplied | See [Deployment Instructions](#14-deployment-instructions) |
 
 The three deliberate flaws are non-breaking acceptance fixtures. Deployment requires only the
 external prerequisites and image bootstrap described below.
@@ -250,7 +290,7 @@ make validate
 The current deployment workspace already has its ignored `Makefile.local`; no setup command is
 needed there. Run `make` to list the available targets.
 
-## 13. Deployment Instructions
+## 14. Deployment Instructions
 
 ### Step A - Bootstrap layer (`terraform/bootstrap`, once, by hand, with elevated credentials)
 
@@ -290,7 +330,7 @@ needed there. Run `make` to list the available targets.
 12. Complete Jenkins first-login setup, create a pipeline job for `jenkins/Jenkinsfile`, and
   trigger it manually.
 
-## 14. Cleanup Instructions
+## 15. Cleanup Instructions
 
 1. Empty (or let the lifecycle rule expire) the S3 logging bucket, then `terraform destroy` -
    `force_destroy` is intentionally not set on the bucket to avoid accidental data loss.
@@ -298,7 +338,7 @@ needed there. Run `make` to list the available targets.
 3. Delete the remote-state S3 bucket/DynamoDB table manually once you're done (they are outside
    Terraform's own state, by necessity).
 
-## 15. Assumptions / External Prerequisites
+## 16. Assumptions / External Prerequisites
 
 1. **ACM certificate** (`certificate_arn`) must be supplied - Terraform does not create or
    validate one.
@@ -310,7 +350,7 @@ needed there. Run `make` to list the available targets.
    setting) for the cost alarm to receive data.
 5. **Deployer IAM identity**: `terraform apply` for the workload layer must be run assuming the
    role created by the separate `terraform/bootstrap` module (see
-   [Terraform Structure](#5-terraform-structure) and [Security Model](#8-security-model)) - that
+  [Terraform Structure](#6-terraform-structure) and [Security Model](#9-security-model)) - that
    bootstrap module itself must be applied once, by hand, with credentials that can create IAM
    roles/policies, before the workload layer can be deployed at all.
 6. **Geo-restriction verification** requires testing from (or via) a Portuguese IP; the WAF rule's
@@ -320,7 +360,7 @@ needed there. Run `make` to list the available targets.
 8. **Initial image bootstrap**: the app and versioned Jenkins images must exist before the full
   workload apply can stabilize.
 
-## 16. Tradeoffs
+## 17. Tradeoffs
 
 These are **architectural decisions**, explicitly not among the three deliberate flaws:
 
@@ -336,7 +376,7 @@ These are **architectural decisions**, explicitly not among the three deliberate
 - **Transcrypt without real secrets** - the tooling is present and configured as required, but
   there's deliberately nothing sensitive in the repo for it to encrypt.
 
-## 17. AI Usage
+## 18. AI Usage
 
 The complete AI interaction record is maintained only in
 [ai-conversation-log.md](ai-conversation-log.md).

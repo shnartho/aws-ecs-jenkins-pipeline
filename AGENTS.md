@@ -48,7 +48,7 @@ pre-commit run --all-files
 ```
 
 There is no application test suite - "testing" here means the checks in
-[README.md's Testing section](README.md#12-testing) (fmt/validate/lint/checkov/detect-secrets plus,
+[README.md's Testing section](README.md#13-testing) (fmt/validate/lint/checkov/detect-secrets plus,
 for a live account, the post-apply verification checklist).
 
 ## Conventions (do not silently deviate)
@@ -59,7 +59,7 @@ for a live account, the post-apply verification checklist).
   merge `local.common_tags`/`var.tags` into a `Name` tag on resources that need one, don't invent a
   new tagging scheme.
 - **File-splitting standard**: one file per resource concern in `envs/eu-central-1` (documented at
-  the top of that directory's `variables.tf` and in README section 5). Reusable multi-resource
+  the top of that directory's `variables.tf` and in README section 6). Reusable multi-resource
   patterns go in `terraform/modules/`, not duplicated per environment.
 - **Checkov/tflint skips must be justified inline** (`# checkov:skip=<ID>: <reason>`) and mirrored
   in `.checkov.yaml` - never silence a finding without a one-line reason a reviewer can check.
@@ -70,7 +70,7 @@ for a live account, the post-apply verification checklist).
 ## Exactly Three Intentional Flaws - Do Not "Fix" Them
 
 This repo intentionally contains **exactly three** flaws, each tagged `# FLAW:` and documented in
-[README.md section 11](README.md#11-the-three-deliberate-flaws):
+[README.md section 12](README.md#12-the-three-deliberate-flaws):
 
 1. Terraform: `terraform/envs/eu-central-1/app.tf` - app task `cpu = 1024` instead of `256`.
 2. Jenkins: `jenkins/Jenkinsfile` - `post.always` uploads verbose logs to S3 on every run.
