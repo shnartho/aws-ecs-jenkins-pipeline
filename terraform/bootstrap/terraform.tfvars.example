@@ -15,6 +15,3 @@ management_aws_profile = "REPLACE_WITH_MANAGEMENT_ACCOUNT_PROFILE_NAME"
 
 sso_target_account_id = "123456789012" # replace with the workload account ID
 sso_user_name          = "REPLACE_WITH_SSO_USERNAME"
-sso_user_email         = "REPLACE_WITH_EMAIL"
-sso_user_given_name    = "REPLACE_WITH_FIRST_NAME"
-sso_user_family_name   = "REPLACE_WITH_LAST_NAME"

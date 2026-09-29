@@ -41,21 +41,6 @@ variable "sso_user_name" {
   type        = string
 }
 
-variable "sso_user_email" {
-  description = "Email address for the Identity Center user (primary email, also used for invites)."
-  type        = string
-}
-
-variable "sso_user_given_name" {
-  description = "Identity Center user's given (first) name."
-  type        = string
-}
-
-variable "sso_user_family_name" {
-  description = "Identity Center user's family (last) name."
-  type        = string
-}
-
 variable "sso_permission_set_name" {
   description = "Name of the Identity Center permission set granting access to the target account."
   type        = string
